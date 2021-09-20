@@ -29,8 +29,8 @@ QUEUE=queue.Queue()
 #prefix to signal the bot to listen to the command
 client = commands.Bot(command_prefix= '!', )
 
-#state variable in rare cases where the song is loaded and you hit the idle timer
-loading_song_state=False
+#state variable in rare cases where the song is loaded and you hit the idle timer perfectly
+queue_is_empty=True
 
 ### Starting message to give some feedback that bot has started
 @client.event
@@ -51,8 +51,9 @@ async def play(ctx, *, arg):
     #if a song is playing or queue is already filled up, add to the back of queue
     if voice != None and (QUEUE.qsize() >= 1 or voice.is_playing()):
         await ctx.send("added: " + url + " to the queue")
-    print("adding to queue")
     QUEUE.put(url)
+    global queue_is_empty
+    queue_is_empty=False
 
     if(voice == None or not voice.is_playing()):
         try:
@@ -63,7 +64,7 @@ async def play(ctx, *, arg):
                     voice = await channel.connect()
                     if(not leaveLoop.is_running()):
                         leaveLoop.start(voice, ctx)
-            await playNext(ctx)
+            playNext(ctx)
 
             #give user feedback with embedded link to the video playing
             await ctx.send("fine I'll play " + url + "... you're welcome :rolling_eyes:")
@@ -79,7 +80,6 @@ async def skip(ctx):
     else:
         voice.stop()
         await ctx.send("yeah, that song was :peach:... Skipping...")
-        await playNext(ctx)
 
 ### really a test function to force the bot into the current channel
 @client.command(pass_context = True)
@@ -134,13 +134,12 @@ def checkFileExists(voice):
     if exists(PATH_TO_SONG_FILE):
         if voice.is_playing():
             voice.stop()
-            time.sleep(2)
         os.remove(PATH_TO_SONG_FILE)
 
 ### downloads the song from YT and stores it to be played
 def downloadAndGetSource(voice):
+    #set flag to show that the bot is currently downloading the song
     global loading_song_state
-    loading_song_state = True
     #check if the bot is currently playing stop it and reset for next song if it is
     checkFileExists(voice)
     with youtube_dl.YoutubeDL(YDL_PROPS) as ydl:
@@ -149,7 +148,6 @@ def downloadAndGetSource(voice):
         if file.endswith(FILE_EXTENSION):
             os.rename(file, SONG_FILE)
     source = SONG_FILE
-    loading_song_state = False
     return source
 
 ### forms the youtube query url
@@ -161,22 +159,32 @@ def getYTURL(arg):
     return YT_WATCH_BASE_URL + video_ids[0]
 
 ### recursive call to continue to play the queue
-async def playNext(ctx):
+def playNext(ctx):
     voice = discord.utils.get(client.voice_clients, guild=ctx.guild)
-    if QUEUE.qsize() >= 1:
-        source = downloadAndGetSource(voice)
-        voice.play(FFmpegPCMAudio(source=source), after=lambda e: playNext(ctx))
+    source = downloadAndGetSource(voice)
+    voice.play(FFmpegPCMAudio(source=source), after=lambda e: playAfter(ctx))
+
+### callback function that either cleans up the file and starts the loop or plays the next song
+def playAfter(ctx):
+    if(QUEUE.qsize() == 0):
+        if(exists(PATH_TO_SONG_FILE)):
+            os.remove(PATH_TO_SONG_FILE)
+        global queue_is_empty
+        queue_is_empty=True
+    else:
+        playNext(ctx)
+
 
 ### once a song starts check back in every 3 minutes to see if bot needs to disconnect
-@tasks.loop(minutes=1)#minutes=3)
+@tasks.loop(minutes=3)
 async def leaveLoop(voice, ctx):
-    if not voice.is_playing() and not voice.is_paused() and QUEUE.qsize() == 0 and not loading_song_state:
+    if not voice.is_playing() and not voice.is_paused() and QUEUE.qsize() == 0 and queue_is_empty:
         if(ctx.voice_client):
             if(voice.is_connected()):
                 await ctx.send("fuck it I'm out :peace:")
                 await ctx.guild.voice_client.disconnect()
             if(exists(PATH_TO_SONG_FILE)):
                 os.remove(PATH_TO_SONG_FILE)
-            leaveLoop.stop()
+            leaveLoop.stop() #kill the loop until it plays a song again
 
 client.run(APIKEY)
