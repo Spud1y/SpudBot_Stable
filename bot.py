@@ -169,7 +169,6 @@ def playNext(ctx):
 ### once a song starts check back in every 3 minutes to see if bot needs to disconnect
 @tasks.loop(minutes=3)
 async def leaveLoop(voice, ctx):
-    print("testing leave")
     if not voice.is_playing() and QUEUE.qsize() == 0:
         if(ctx.voice_client):
             await ctx.guild.voice_client.disconnect()
