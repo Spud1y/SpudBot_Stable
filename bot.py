@@ -55,7 +55,6 @@ async def play(ctx, *, arg):
     QUEUE.put(url)
 
     if(voice == None or not voice.is_playing()):
-        print("inside if no voice")
         try:
             #check if bot is in current channel, move it if needed
             if(ctx.author.voice):
@@ -163,7 +162,6 @@ def getYTURL(arg):
 
 ### recursive call to continue to play the queue
 async def playNext(ctx):
-    print("in next")
     voice = discord.utils.get(client.voice_clients, guild=ctx.guild)
     if QUEUE.qsize() >= 1:
         source = downloadAndGetSource(voice)
