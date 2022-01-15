@@ -5,6 +5,7 @@ import re
 import time
 import urllib.request
 import youtube_dl
+import asyncio
 
 from discord.ext import commands, tasks
 from discord.player import FFmpegPCMAudio
@@ -64,7 +65,7 @@ async def play(ctx, *, arg):
                     voice = await channel.connect()
                     if(not leaveLoop.is_running()):
                         leaveLoop.start(voice, ctx)
-            playNext(ctx)
+            await playNext(ctx)
 
             #give user feedback with embedded link to the video playing
             await ctx.send("fine I'll play " + url + "... you're welcome :rolling_eyes:")
@@ -153,30 +154,41 @@ def downloadAndGetSource(voice):
 ### forms the youtube query url
 def getYTURL(arg):
     #multi word args come in as "blah blah" urls use "+" to concat GET request parameters
-    replaceSpaces=arg.strip().replace(" ", "+")
+    regexReplace = re.sub('[^A-Za-z0-9]+', ' ', arg)
+    replaceSpaces = regexReplace.strip().replace(" ", "+")
     html = urllib.request.urlopen(YT_REQUEST_BASE_URL + replaceSpaces)
     video_ids = re.findall(r"watch\?v=(\S{11})", html.read().decode())
     return YT_WATCH_BASE_URL + video_ids[0]
 
 ### recursive call to continue to play the queue
-def playNext(ctx):
+async def playNext(ctx):
     voice = discord.utils.get(client.voice_clients, guild=ctx.guild)
-    source = downloadAndGetSource(voice)
-    voice.play(FFmpegPCMAudio(source=source), after=lambda e: playAfter(ctx))
+    #source = downloadAndGetSource(voice)
+    #voice.play(FFmpegPCMAudio(source=source), after=lambda e: playAfter(ctx))
+    FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
+    YDL_OPTIONS = {'format':"bestaudio"}
+    vc = ctx.voice_client
+
+    with youtube_dl.YoutubeDL(YDL_OPTIONS) as ydl:
+        info = ydl.extract_info(QUEUE.get(), download=False)
+        url2 = info['formats'][0]['url']
+        source = await discord.FFmpegOpusAudio.from_probe(url2, **FFMPEG_OPTIONS)
+        vc.play(source, after = lambda e: asyncio.run_coroutine_threadsafe(playAfter(ctx), client.loop))
+
 
 ### callback function that either cleans up the file and starts the loop or plays the next song
-def playAfter(ctx):
+async def playAfter(ctx):
     if(QUEUE.qsize() == 0):
         if(exists(PATH_TO_SONG_FILE)):
             os.remove(PATH_TO_SONG_FILE)
         global queue_is_empty
         queue_is_empty=True
     else:
-        playNext(ctx)
+        await playNext(ctx)
 
 
 ### once a song starts check back in every 3 minutes to see if bot needs to disconnect
-@tasks.loop(minutes=3)
+@tasks.loop(minutes=10)
 async def leaveLoop(voice, ctx):
     if not voice.is_playing() and not voice.is_paused() and QUEUE.qsize() == 0 and queue_is_empty:
         if(ctx.voice_client):
