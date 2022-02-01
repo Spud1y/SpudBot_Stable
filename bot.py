@@ -63,8 +63,8 @@ async def play(ctx, *, arg):
                 channel = ctx.message.author.voice.channel
                 if(voice == None):
                     voice = await channel.connect()
-                    if(not leaveLoop.is_running()):
-                        leaveLoop.start(voice, ctx)
+                    #if(not leaveLoop.is_running()):
+                    #    leaveLoop.start(voice, ctx)
             await playNext(ctx)
 
             #give user feedback with embedded link to the video playing
@@ -101,8 +101,8 @@ async def leave(ctx):
         QUEUE.queue.clear()
         if(exists(PATH_TO_SONG_FILE)):
             os.remove(PATH_TO_SONG_FILE)
-        if(leaveLoop.is_running() and not leaveLoop.is_being_cancelled()):
-            leaveLoop.stop()
+        #if(leaveLoop.is_running() and not leaveLoop.is_being_cancelled()):
+        #    leaveLoop.stop()
         #cleanup file if the bot leaves the channel mid song
     else:
         await ctx.send("bot not in channel")
@@ -154,6 +154,8 @@ def downloadAndGetSource(voice):
 ### forms the youtube query url
 def getYTURL(arg):
     #multi word args come in as "blah blah" urls use "+" to concat GET request parameters
+    if arg.startswith('http') or arg.startswith('https'): 
+        return arg
     regexReplace = re.sub('[^A-Za-z0-9]+', ' ', arg)
     replaceSpaces = regexReplace.strip().replace(" ", "+")
     html = urllib.request.urlopen(YT_REQUEST_BASE_URL + replaceSpaces)
@@ -172,31 +174,29 @@ async def playNext(ctx):
     with youtube_dl.YoutubeDL(YDL_OPTIONS) as ydl:
         info = ydl.extract_info(QUEUE.get(), download=False)
         url2 = info['formats'][0]['url']
+        os.system("youtube-dl --rm-cache-dir")
         source = await discord.FFmpegOpusAudio.from_probe(url2, **FFMPEG_OPTIONS)
-        vc.play(source, after = lambda e: asyncio.run_coroutine_threadsafe(playAfter(ctx), client.loop))
+        vc.play(source, after = lambda e: asyncio.run_coroutine_threadsafe(playAfter(ctx, vc), client.loop))
 
 
 ### callback function that either cleans up the file and starts the loop or plays the next song
-async def playAfter(ctx):
+async def playAfter(ctx, vc):
     if(QUEUE.qsize() == 0):
-        if(exists(PATH_TO_SONG_FILE)):
-            os.remove(PATH_TO_SONG_FILE)
-        global queue_is_empty
-        queue_is_empty=True
+        await vc.disconnect()
     else:
         await playNext(ctx)
 
 
 ### once a song starts check back in every 3 minutes to see if bot needs to disconnect
-@tasks.loop(minutes=10)
-async def leaveLoop(voice, ctx):
-    if not voice.is_playing() and not voice.is_paused() and QUEUE.qsize() == 0 and queue_is_empty:
-        if(ctx.voice_client):
-            if(voice.is_connected()):
-                await ctx.send("fuck it I'm out :peace:")
-                await ctx.guild.voice_client.disconnect()
-            if(exists(PATH_TO_SONG_FILE)):
-                os.remove(PATH_TO_SONG_FILE)
-            leaveLoop.stop() #kill the loop until it plays a song again
+#@tasks.loop(minutes=10)
+#async def leaveLoop(voice, ctx):
+#    if not voice.is_playing() and not voice.is_paused() and QUEUE.qsize() == 0 and queue_is_empty:
+#        if(ctx.voice_client):
+#            if(voice.is_connected()):
+#                await ctx.send("fuck it I'm out :peace:")
+#                await ctx.guild.voice_client.disconnect()
+#            if(exists(PATH_TO_SONG_FILE)):
+#                os.remove(PATH_TO_SONG_FILE)
+#            leaveLoop.stop() #kill the loop until it plays a song again
 
 client.run(APIKEY)
